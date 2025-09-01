@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub struct TokenTransferParams {
     pub sender_secret: String,
+    pub sender_address: String,
     pub recipient_address: String,
     pub issuer_address: String,
     pub currency_code: String,
@@ -12,6 +13,7 @@ pub struct TokenTransferParams {
 #[derive(Debug, Clone)]
 pub struct OfflineSigningParams {
     pub sender_secret: String,
+    pub sender_address: String,
     pub recipient_address: String,
     pub issuer_address: String,
     pub currency_code: String,

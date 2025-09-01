@@ -1,15 +1,49 @@
-use crate::{Error, Result};
+use crate::Result;
 use crate::models::{TokenTransferParams, OfflineSigningParams, TransactionResult, VerificationParams};
 use crate::client::XrplClient;
+use crate::wallet::{XrplWallet, seed_to_private_key};
 use serde_json::json;
 
-pub async fn send_token(_params: TokenTransferParams) -> Result<TransactionResult> {
-    let _client = XrplClient::new();
+pub async fn send_token(params: TokenTransferParams) -> Result<TransactionResult> {
+    let client = XrplClient::new();
     
-    // for prod better use xrpl-rust for real signing
-    Err(Error::ValidationError(
-        "error occured while sending token".to_string()
-    ))
+    let private_key = seed_to_private_key(&params.sender_secret)?;
+    
+    let wallet = XrplWallet::from_secret(&private_key)?;
+    
+    
+    let tx_json = if params.currency_code == "XRP" {
+        json!({
+            "TransactionType": "Payment",
+            "Destination": params.recipient_address,
+            "Amount": params.amount, 
+            "Fee": "12" 
+        })
+    } else {
+        json!({
+            "TransactionType": "Payment",
+            "Destination": params.recipient_address,
+            "Amount": {
+                "currency": params.currency_code,
+                "issuer": params.issuer_address,
+                "value": params.amount
+            },
+            "Fee": "12" 
+        })
+    };
+    
+    let signed_blob = wallet.sign_transaction(&tx_json, &client, &params.sender_address).await?;
+    
+    let result = client.submit(&signed_blob).await?;
+    
+    let success = result["engine_result"].as_str() == Some("tesSUCCESS");
+    let hash = result["tx_json"]["hash"]
+        .as_str()
+        .or_else(|| result["hash"].as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    
+    Ok(TransactionResult { hash, success })
 }
 
 pub async fn verify_token_sent(params: VerificationParams) -> Result<bool> {
@@ -48,10 +82,14 @@ pub async fn verify_token_sent(params: VerificationParams) -> Result<bool> {
     Ok(false)
 }
 
-pub fn sign_transfer_offline(params: OfflineSigningParams) -> Result<String> {
+pub async fn sign_transfer_offline(params: OfflineSigningParams) -> Result<String> {
+    let private_key = seed_to_private_key(&params.sender_secret)?;
+    
+    let wallet = XrplWallet::from_secret(&private_key)?;
+    
     let tx_json = json!({
         "TransactionType": "Payment",
-        "Account": "rADDRESS_PLACEHOLDER", 
+        "Account": params.sender_address,
         "Destination": params.recipient_address,
         "Amount": {
             "currency": params.currency_code,
@@ -63,16 +101,20 @@ pub fn sign_transfer_offline(params: OfflineSigningParams) -> Result<String> {
         "LastLedgerSequence": params.last_ledger_sequence
     });
     
-    Ok(tx_json.to_string())
+    let client = XrplClient::new();
+    wallet.sign_transaction(&tx_json, &client, &params.sender_address).await
 }
 
 pub async fn submit_signed_transaction(signed_tx_blob: &str) -> Result<TransactionResult> {
-    let _client = XrplClient::new();
+    let client = XrplClient::new();
     
-    let _parsed: serde_json::Value = serde_json::from_str(signed_tx_blob)?;
+    let result = client.submit(signed_tx_blob).await?;
     
-    Ok(TransactionResult { 
-        hash: "MOCK_TRANSACTION_HASH".to_string(), 
-        success: false 
-    })
+    let success = result["engine_result"].as_str() == Some("tesSUCCESS");
+    let hash = result["tx_json"]["hash"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    
+    Ok(TransactionResult { hash, success })
 }
